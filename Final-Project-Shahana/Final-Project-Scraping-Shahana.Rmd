@@ -1,0 +1,169 @@
+---
+title: "Web-Scrapping Final Project"
+author: "Shahana Ayobi"
+date: '2022-12-24'
+output:
+  html_document:
+    df_print: paged
+  prettydoc::html_pretty:
+    theme: cayman
+---
+
+```{r setup, include=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+```
+# 1. Introduction
+The main objective of this report is to scrape the list of all available yachts for sale on Boat International Website and Analyze the acquired scraped data.Boat International is the leading authority on superyachts, publishing premium books and publications, planning events, and offering digital media services and data to superyacht owners and industry professionals. It contains details on various yacht types and their features. For this project, I have scrapped yacht specifications of both yacht types (Sail and Motor Yachts) provided by the website. In order for potential clients to make an informed decision about which type of yacht to purchase based on their preferences, I have evaluated both yacht types from a variety of aspects, including price, length, and cruising speed.
+```{r include=FALSE}
+library(rvest)
+library(data.table)
+library(dplyr)
+library(jsonlite)
+require(httr)
+library(tidyverse)
+library(modelsummary)
+library(writexl)
+library(readxl)
+library(kableExtra)
+```
+
+# 2. Scrapping One Yacht Page Using Rvest
+In order to get all the data, I first scraped the data about one yacht. To do that, I read the individual URL for one yacht (SO Nice Alloy) in Rstudio using Rvest package and then used the Chrome extension, Selector Gadget to detect the HTML nodes. I used a function that takes the URL as an input and returns a list of all elements contained within that webpage.
+```{r eval=FALSE, include=FALSE}
+url <- 'https://www.boatinternational.com/yachts-for-sale/so-nice-alloy-2009'
+
+t <- read_html(url)
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Getting details for one yatch using function
+get_one_yacht  <- function(url) {
+  t_list <- list()
+  t <- read_html(url)
+  t_list[['title']] <- t %>% html_node('.heading--large') %>% html_text()
+  t_list[['price']] <- t %>% html_nodes('.stats__heading span+ span') %>% html_text()
+  
+  keys <- t %>% html_nodes('.spec-block__title') %>% html_text()
+  values <- t %>% html_nodes('.spec-block__data') %>% html_text()
+  if (length(keys)==length(values)) {
+    for (i in 1:length(keys)) {
+      t_list[[keys[i]]] <- values[i]
+    }
+  }
+  
+  return(t_list)
+  
+}
+
+```
+
+# 3. Scraping All Pages Using DevTools and HTTR
+The Boat International website does not include page numbers, the webpage manually loads as you scroll down, and each load returns with 50 yachts. Since the website sends JSON inside the HTML documents, I used the Chrome Developer tools to get the JSON request for all the page links. I did this by simply pressing the function key F12 to open the Network tab, loading the website, and then finding the JSON request that includes all the links. Then, I copied the request as a CURL command and converted it to R using CURL converter.
+The R converted CURL command was then loaded into RStudio using HTTR package. Because the URL returned JSON, I converted it to R object using the Jsonlite package and then to a dataframe. Since the links inside the URL only included the path (e.g. "/yachts-for-sale/coca-vi-leopard-2000") but not the protocol and the domain ("https://www.boatinternational.com"), I pasted the domain into the URL path column in order to receive the complete path. I have then combined all these links with the one yacht function to get the information from all pages and eventually rbindlisted it into a data frame. Once I got the data frames, I saved them into a local folder and loaded them back again since the website has not been responding.
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+
+params = list(
+  `operationName` = 'searchPublishedContent',
+  `variables` = '{"limit":686,"offset":50,"sort":"sponsored:desc,featured:desc,date:desc","rawQueryStringified":"{\\"bool\\":{\\"must\\":[{\\"bool\\":{\\"must\\":[{\\"bool\\":{\\"should\\":[]}}]}}],\\"filter\\":{\\"bool\\":{\\"must\\":[{\\"term\\":{\\"docType\\":\\"published_yacht_for_sale\\"}}]}},\\"must_not\\":[{\\"ids\\":{\\"values\\":[\\"32a4c780-388f-11ea-850e-31ecb8b8ac17\\"]}}]}}"}',
+  `extensions` = '{"persistedQuery":{"version":1,"sha256Hash":"29374c338c429a69f982a8ee30dffce44b22b9f3b65805d513af2806cd2f48bb"}}'
+)
+
+res <- httr::GET(url = 'https://www.boatinternational.com/graphql', query = params)
+df <- data.frame(fromJSON(content(res, "text")))
+links <- paste0('https://www.boatinternational.com', df$data.searchPublishedContent.results.url)
+all_links <- as.list(links)
+all_list <- lapply(all_links, get_one_yacht)
+df2 <- rbindlist(all_list, fill = T)
+
+```
+
+```{r echo=TRUE}
+data_in <- "/Users/shahanaayobi/ECBS-5306-Coding-2-Web-Scraping-with-R-2/"
+df<- read_excel(paste0("df.xlsx"))
+df2<- read_csv(paste0("df2-2.csv"))
+head(df2)
+```
+
+# 4. Cleaning the Data
+In order to conduct some analysis, it is necessary to clean the data. To properly represent variables like price, yacht length, and cruising speed in numeric form, commas, symbols, and measurement units have been omitted. To make the analysis more comprehensive, I divided the yacht prices by 1000 to avoid having large numbers in plots. Also, I created a new variable and factored the yacht type into Motor and Sail Yacht categories.
+The following code chunk shows how the data was cleaned and transformed:
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+df2 <- df2 %>% filter(df2$price!="VAT paid") %>%
+  mutate(title=gsub("for sale", "", title, fixed = T)) %>% 
+  mutate(price=gsub("$", "", price, fixed = T)) %>% 
+  mutate(price=gsub("€", "", price, fixed = T)) %>% 
+  mutate(price=gsub("£", "", price, fixed = T)) %>%
+  mutate(price=gsub(",", "", price, fixed = T)) %>%  
+  mutate(price=as.numeric(price)) %>% 
+  mutate(price_n=price/1000)
+df2 <- df2 %>% mutate(df2,yacht_type = factor(df2$`Yacht Type:` == 'Motor Yacht', levels = c(TRUE,FALSE),labels = c('Motor Yacht','Sail Yacht')), .after = `Yacht Type:`)
+df2 <- df2 %>% mutate(yacht_length = gsub("metres", "", `Length Overall:`), .after = `Length Overall:`)
+df2 <- df2 %>% mutate(yacht_length=as.numeric(yacht_length))
+df2 <- df2 %>% mutate(cruising_speed = gsub("kn", "", `Cruising Speed:`), .after = `Cruising Speed:`)
+df2 <- df2 %>% mutate(cruising_speed=as.numeric(cruising_speed))
+```
+
+# 5. Descriptive Statistics and Visualizations
+After cleaning the data, we have an overall of 623 yachts and the descriptive statistics for our relevant variables are presented in the following table for each yacht type separately.
+
+```{r echo=TRUE, message=FALSE}
+datasummary( yacht_type*( price_n + yacht_length + cruising_speed) ~
+               Mean + Median + Min + Max + SD, data= df2, title = 'Descriptive Statistics') %>% 
+      kable_styling(latex_options = c("HOLD_position","scale_down"))
+```
+
+The distribution of yacht prices can be seen to be significantly skewed in the graph below, with the majority of yachts costing under $25,000,000 and only a few scattered values to the graph's right.
+
+```{r echo=TRUE, fig.height=4, fig.width=7, message=FALSE, warning=FALSE}
+ggplot(data=df2, aes(x=price_n, na.rm=T))+ 
+  geom_histogram( fill="turquoise", color="blue") +
+  labs(x = 'Yacht Prices (In Thousands)', y = 'Count', title = "Figure 1: Distribution of Yacht Prices") + theme_classic() +
+  theme(legend.position="none")+ xlim(0, 100000)
+```
+
+I was curious about the distribution of yacht prices for each yacht type separately, so I created the graph below. It can be inferred that most Sail yachts are less expensive than Motor yachts, and the distribution for both yacht types is skewed, with most Sail yacht values falling below $10,000,000.
+
+```{r echo=TRUE, fig.height=4, fig.width=7, message=FALSE, warning=FALSE}
+ggplot(data=df2, aes(x=price_n,color = yacht_type, fill=yacht_type, na.rm=T))+
+  geom_density(data=subset(df2, yacht_type == 'Motor Yacht')) + 
+  geom_density(data=subset(df2, yacht_type== 'Sail Yacht'),aes(alpha=0.35), show.legend = FALSE) + 
+  labs(x = 'Price (In Thousands)', y = 'Density', 
+       title = "Figure 2: Distribution of Motor and Sail Yacht Prices")  + theme_classic() + xlim(0,80000)
+
+```
+
+I also wanted to investigate whether yachts with longer lenght have higher prices. The following graph confirms this relationship and the linear regression line is indeed upward sloping meaning larger yachts are indeed more expensive.
+
+```{r echo=TRUE, fig.height=4, fig.width=7, message=FALSE, warning=FALSE}
+ggplot(data=df2, aes(x=yacht_length, y=price_n)) +
+  stat_summary_bin(color = "#3a5e8cFF") +
+  labs(x = 'Yacht Lenght', y = 'Price (In Thousands)') + 
+  theme_light() + 
+  geom_smooth(color="coral", method = lm) +
+  theme(legend.position="none") + xlim(10, 55) + 
+  ggtitle("Figure 3: Linear Regression: Relatioship Between Yacht Length and Price")
+```
+
+I wanted to check whether there is any difference between the lengths of Motor and Sail Yachts.
+
+```{r echo=TRUE, fig.height=4, fig.width=7, message=FALSE, warning=FALSE}
+ggplot(data=df2, aes(x=yacht_length,color = yacht_type, fill=yacht_type, na.rm=T))+
+ geom_density(data=subset(df2, yacht_type == 'Motor Yacht')) + 
+ geom_density(data=subset(df2, yacht_type== 'Sail Yacht'),aes(alpha=0.35), show.legend = FALSE) + 
+ labs(x = 'Yacht Length (In Metres)', y = 'Density', 
+  title = "Figure 4: Distribution of Motor and Sail Yacht Length")  + theme_classic()
+```
+
+Eventually, I wanted to compare which yacht type has higher cruising speed. As it is apparent, Motor yachts have higher cruising speed than Sail yachts.
+
+```{r echo=TRUE, fig.height=4, fig.width=5, message=FALSE, warning=FALSE}
+df3 <- df2
+df3 <- df3[!is.na(df3$yacht_type), ]
+ggplot(data=df3, aes(x=yacht_type, y=cruising_speed, na.rm=T)) + stat_summary(geom="bar", fill = '#40C4F9') +
+  labs(title = 'Figure 5: Cruising Speed for Each Yacht Type') +
+  theme_bw() + labs(x= "Yacht Type", y="Cruising Speed")
+
+```
+
+# 6. Conclusion
+This project demonstrated how we can scrape the entirety of the data from a website and prepare it for analysis utilizing simple tools and R packages like Selector Gadget, DevTools, Rvest, and HTTR. By scraping the data from Boat International website, we were able to analyze that Motor yachts are usually more expensive, are larger, and have higher cruising speed compared to Sail yacht in General. However, these values do differ for certain yachts in the distribution, but from the overall image, we can infer the above-mentioned conclusion.

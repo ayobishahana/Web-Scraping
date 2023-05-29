@@ -1,0 +1,55 @@
+---
+title: "News Scraping"
+author: "Shahana Ayobi"
+date: '2022-11-23'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r include=FALSE}
+library(rvest)
+library(data.table)
+library(tidyverse)
+rm(list=ls())
+```
+
+-   **Creating a function that scrapes one page of a news site:**
+
+```{r}
+url <-'https://defence-blog.com/category/news/'
+t <- read_html(url)
+titles <- t %>% html_nodes('#tdi_55 .td-module-title a') %>% html_text()
+link <- paste0('https://defence-blog.com', t %>% html_nodes('#tdi_55 .td-module-title a') %>% html_attr('href'))
+teasers <- t %>% html_nodes('.td-excerpt') %>% html_text()
+
+get_defence_one_page <- function(url) {
+  
+  t <- read_html(url)
+  titles <- t %>% html_nodes('#tdi_55 .td-module-title a') %>% html_text()
+  link <- paste0('https://defence-blog.com', t %>% html_nodes('#tdi_55 .td-module-title a') %>% html_attr('href'))
+  teasers <- t %>% html_nodes('.td-excerpt') %>% html_text()
+  df <- data.frame('titles' = titles, 'link'= link, 'teasers'= teasers)
+  return(df)
+}
+```
+
+-   **Creating the links for the first 10 page:**
+
+```{r}
+links <- paste0('https://defence-blog.com/category/news/page/', 1:10, '/')
+```
+
+-   **Applying the function to the vector containing the links:**
+
+```{r}
+list_of_pages <- lapply(links, get_defence_one_page)
+```
+
+-   **Rbindlisting the data frames into one:**
+
+```{r}
+df <- rbindlist(list_of_pages)
+```
